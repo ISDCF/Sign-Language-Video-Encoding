@@ -1,0 +1,149 @@
+#!/usr/bin/perl
+#
+# Copyright 2017 Mike Radford <Mike.Radford@fox.com>, 
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 3. The name of the author may not be used to endorse or promote products
+#    derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+use strict;
+use warnings;
+use File::Temp qw(tempfile tempdir);
+use File::Slurp qw(read_dir read_file);
+use Getopt::Long;
+use File::Which qw(which);
+
+use constant USAGE                 => "usage: $0 [ --chunk-duration <sec> ] <MovieFile>\n";
+use constant MARKER                => 0xFFFFFFFF;
+use constant AUDIO_SAMPLE_RATE     => 48000;
+use constant AUDIO_BITS_PER_SAMPLE => 24;
+use constant BITS_PER_BYTE         => 8;
+use constant BITRATE               => AUDIO_SAMPLE_RATE * AUDIO_BITS_PER_SAMPLE / 2;
+
+# TODO: Check ffmpeg version
+which "ffmpeg"  or die "This utility requires ffmpeg v3.2.4 or greater.\n";
+which "ffprobe" or die "This utility requires ffprobe v3.2.4 or greater.\n";
+
+my $chunk_duration_s = 2; # default to what is in the spec
+
+GetOptions("chunk-duration|c=i" => \$chunk_duration_s) or die USAGE;
+
+my $input = shift or die USAGE;
+
+die "$input: No such file\n" unless -e $input;
+
+sub probe_val ($) { `ffprobe -loglevel error -of default=nw=1:nk=1 -i "$input" -select_streams v:0 -show_entries stream=$_[0]` }
+
+my $final_wav = do { my ($base) = $input =~ /^(.+)\.[^.]+$/ or die; "$base.wav" };
+
+die "$final_wav already exists. Aborting...\n" if -e $final_wav;
+
+my $fps = +[split '/', probe_val 'r_frame_rate']->[0];
+my $chunk_len_frames = $chunk_duration_s * $fps;
+my $chunk_len_bytes = AUDIO_SAMPLE_RATE * AUDIO_BITS_PER_SAMPLE / BITS_PER_BYTE * $chunk_duration_s;
+my $build_dir = tempdir;
+
+my @resizing_flags = do {
+  print "Looking to see if resizing is necessary...\n";
+  my $input_width  = probe_val 'width';
+  my $input_height = probe_val 'height';
+  ($input_width||0 > 480 or $input_height||0 > 640) ?
+      ('-filter:v', 'scale=w=480:h=640:force_original_aspect_ratio=decrease') : ();
+};
+
+print <<EOF;
+Encoding with:
+  Frame Rate: $fps fps
+  Chunk Length: $chunk_len_frames frames
+  Max Chunk Size: $chunk_len_bytes bytes
+  Bitrate: @{[ BITRATE ]}
+  Resizing: @resizing_flags
+EOF
+
+# segfaults, but works
+system 'ffmpeg',
+       '-loglevel', 'quiet',
+       '-hide_banner',
+       '-i', $input,
+       '-map', '0:0',
+       '-pix_fmt', 'yuv420p',
+       @resizing_flags,
+       '-c:v', 'libvpx-vp9',
+       '-keyint_min', $chunk_len_frames, '-g', $chunk_len_frames,
+       '-speed', '6', '-tile-columns', '4', '-frame-parallel', '1', '-threads', '8',
+       '-static-thresh', '0', '-max-intra-rate', '300', '-deadline', 'realtime',
+       '-lag-in-frames', '0', '-error-resilient', '1',
+       '-b:v', BITRATE, '-minrate', BITRATE, '-maxrate', BITRATE,
+       '-an',
+       '-sn',
+       '-f', 'webm_chunk',
+       '-header', "$build_dir/chunk.hdr",
+       '-chunk_start_index', '1',
+       "$build_dir/chunk_%05d.chk";
+
+print "Success! Encoded all chunks to vp9\n";
+
+my $vp9_hdr = read_file "$build_dir/chunk.hdr";
+
+unlink "$build_dir/chunk.hdr" or die; # so we don't have to filter it out below
+
+my ($fh, $vp9_pcm_file) = tempfile;
+
+print "Adding headers and padding each chunk to $chunk_len_bytes bytes.\n";
+
+for my $file (sort { $a cmp $b } read_dir $build_dir, prefix => 1) {
+  my $vp9_seg = read_file $file or die;
+
+  die "$_ too big: @{[ length $vp9_seg ]} > $chunk_len_bytes. Aborting!\n"
+      if length $vp9_seg > $chunk_len_bytes;
+
+  my $block = pack "a$chunk_len_bytes",      # pad block to chunk_len_bytes
+                    pack("N5",               # header is 5 32-bit unsigned big-endian longs
+                         MARKER,             # 4 bytes of FF
+                         length $vp9_seg,    # length of valid data in chunk to chunk header
+                         $chunk_len_bytes,   # length of padded chunk including chunk header
+                         length $vp9_hdr,    # length of vp9 header
+                         MARKER) .           # another 4 bytes of FF
+                    $vp9_hdr .               # the vp9 header
+                    $vp9_seg;                # the vp9 segment itself
+
+  die unless length $block == $chunk_len_bytes;
+  print $fh $block;
+}
+
+close $fh;
+
+print "Generating WAV from raw PCM.\n";
+
+# Wrap the PCM in a WAV
+system 'ffmpeg',
+    '-loglevel', 'quiet',
+    '-ac', '1',
+    '-ar', AUDIO_SAMPLE_RATE,
+    '-y',
+    '-f', 's24le',
+    '-acodec', 'pcm_s24le',
+    '-i', $vp9_pcm_file,
+    '-codec:a', 'copy', $final_wav and die "ffmpeg failed!\n";
+
+print "Success! Wrote to:\n\t$final_wav (use this file for the DCP)\n";
+
+unlink $vp9_pcm_file;
