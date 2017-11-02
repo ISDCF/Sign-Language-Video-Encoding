@@ -5,10 +5,6 @@ A simple encoder and decoder that conforms to the [ISDCF Document on Sign Langua
 ## Requirements
 [ffmpeg](https://www.ffmpeg.org) >= 3.2.4. In particular, the executables ffmpeg, ffprobe and ffplay must be in your path.
 
-## What's included
-
-A simple encoder and decoder.
-
 ## Synopsis
 
 ### Encoding
@@ -17,7 +13,7 @@ A simple encoder and decoder.
 $ encode-vp9-wav sign-language.mp4
 ```
 
-This will generate a wav file suitable for inclusiong on channel 15 of a DCP.
+This will generate a wav file suitable for inclusion on channel 15 of a DCP.
 
 ### Decoding
 
