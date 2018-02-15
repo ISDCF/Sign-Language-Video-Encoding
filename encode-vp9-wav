@@ -29,7 +29,7 @@ use warnings;
 use File::Temp qw(tempfile tempdir);
 use File::Slurp qw(read_dir read_file);
 use Getopt::Long;
-use File::Which qw(which);
+sub which ($) { scalar grep -x, map "$_/$_[0]", split m/:/, $ENV{PATH} }
 
 use constant USAGE                 => "usage: $0 [ --chunk-duration <sec> ] <MovieFile>\n";
 use constant MARKER                => 0xFFFFFFFF;
