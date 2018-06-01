@@ -65,7 +65,7 @@ my @resizing_flags = do {
   print "Looking to see if resizing is necessary...\n";
   my $input_width  = probe_val 'width';
   my $input_height = probe_val 'height';
-  ($input_width||0 > 480 or $input_height||0 > 640) ?
+  (($input_width||0) > 480 or ($input_height||0) > 640) ?
       ('-filter:v', 'scale=w=480:h=640:force_original_aspect_ratio=decrease') : ();
 };
 
