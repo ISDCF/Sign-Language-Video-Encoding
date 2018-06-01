@@ -3,7 +3,9 @@
 A simple encoder and decoder that conforms to the [ISDCF Document on Sign Language Video Encoding](http://isdcf.com/papers/ISDCF-Doc13-Sign-Language-Video-Encoding-for-Digital-Cinema.pdf).
 
 ## Requirements
-[FFmpeg](https://www.ffmpeg.org) >= 3.2.4. In particular, the executables `ffmpeg`, `ffprobe`, and `ffplay` must be in your path.
+[FFmpeg](https://www.ffmpeg.org) v3.2.4 is required. In particular, the executables `ffmpeg`, `ffprobe`, and `ffplay` must be in your path.
+
+Note: later versions of FFmpeg are known to not work at this time.
 
 ## Synopsis
 
