@@ -1,6 +1,6 @@
 # Sign Language Video Encoding For Digital Cinema
 
-A simple encoder and decoder that conforms to the [ISDCF Document on Sign Language Video Encoding](http://isdcf.com/papers/ISDCF-Doc13-Sign-Language-Video-Encoding-for-Digital-Cinema.pdf).
+A simple encoder and decoder that conforms to the [ISDCF Document on Sign Language Video Encoding](https://files.isdcf.com/papers/ISDCF-Doc13-Sign-Language-Video-Encoding-for-Digital-Cinema.pdf).
 
 ## Requirements
 [FFmpeg](https://www.ffmpeg.org) v3.2.4 is required. In particular, the executables `ffmpeg`, `ffprobe`, and `ffplay` must be in your path.
