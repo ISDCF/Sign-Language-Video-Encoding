@@ -28,6 +28,8 @@ use strict;
 use warnings;
 use File::Temp qw(tempfile tempdir);
 use File::Slurp qw(read_dir read_file);
+use File::Path qw(rmtree);
+use File::Spec qw(join);
 use Getopt::Long;
 sub which ($) { scalar grep -x, map "$_/$_[0]", split m/:/, $ENV{PATH} }
 
@@ -43,8 +45,10 @@ which "ffmpeg"  or die "This utility requires ffmpeg v3.2.4 or greater.\n";
 which "ffprobe" or die "This utility requires ffprobe v3.2.4 or greater.\n";
 
 my $chunk_duration_s = 2; # default to what is in the spec
+my $log_level = "quiet";
 
-GetOptions("chunk-duration|c=i" => \$chunk_duration_s) or die USAGE;
+GetOptions("chunk-duration|c=i" => \$chunk_duration_s,
+           "log-level=s" => \$log_level) or die USAGE;
 
 my $input = shift or die USAGE;
 
@@ -80,7 +84,7 @@ EOF
 
 # segfaults, but works
 system 'ffmpeg',
-       '-loglevel', 'quiet',
+       '-loglevel', $log_level,
        '-hide_banner',
        '-i', $input,
        '-map', '0:v:0',
@@ -109,7 +113,8 @@ my ($fh, $vp9_pcm_file) = tempfile;
 
 print "Adding headers and padding each chunk to $chunk_len_bytes bytes.\n";
 
-for my $file (sort { $a cmp $b } read_dir $build_dir, prefix => 1) {
+for my $filename (sort { $a cmp $b } read_dir $build_dir, prefix => 1) {
+  my $file = File::Spec->catfile($build_dir, $filename);
   my $vp9_seg = read_file $file or die;
 
   die "$_ too big: @{[ length $vp9_seg ]} > $chunk_len_bytes. Aborting!\n"
@@ -135,7 +140,7 @@ print "Generating WAV from raw PCM.\n";
 
 # Wrap the PCM in a WAV
 system 'ffmpeg',
-    '-loglevel', 'quiet',
+    '-loglevel', $log_level,
     '-ac', '1',
     '-ar', AUDIO_SAMPLE_RATE,
     '-y',
@@ -144,6 +149,7 @@ system 'ffmpeg',
     '-i', $vp9_pcm_file,
     '-codec:a', 'copy', $final_wav and die "ffmpeg failed!\n";
 
-print "Success! Wrote to:\n\t$final_wav (use this file for the DCP)\n";
-
 unlink $vp9_pcm_file;
+rmtree($build_dir);
+
+print "Success! Wrote to:\n\t$final_wav (use this file for the DCP)\n";
