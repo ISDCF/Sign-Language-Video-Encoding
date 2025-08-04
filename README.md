@@ -7,6 +7,9 @@ A simple encoder and decoder that conforms to the [ISDCF Document on Sign Langua
 
 Note: later versions of FFmpeg are known to not work at this time.
 
+Futhermore, the File::Slurp, File::Temp, and Getopt::Long Perl modules are required.
+
+
 ## Synopsis
 
 ### Encoding
